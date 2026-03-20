@@ -2,7 +2,7 @@ services:
   - type: web
     name: refactor-visualizer
     runtime: node
-    buildCommand: npm install && cd client && npm install && npm run build && ls -la dist/
+    buildCommand: npm install && cd client && npm install && npm run build
     startCommand: node server/index.js
     envVars:
       - key: PHAB_URL
