@@ -14,6 +14,11 @@ const snapshotSchema = new mongoose.Schema({
   total_files: { type: Number, default: 0 },
   java_files: { type: Number, default: 0 },
   kotlin_files: { type: Number, default: 0 },
+  class_list: [{
+    name: String,
+    file: String,
+    language: { type: String, enum: ['java', 'kotlin'] },
+  }],
 });
 
 snapshotSchema.index({ commit_hash: 1, folder_path: 1 }, { unique: true });
@@ -67,4 +72,14 @@ async function hasCommit(commitHash, folder) {
   return !!doc;
 }
 
-module.exports = { connectDb, insertSnapshot, getSnapshots, getLatestSnapshot, hasCommit };
+async function getAdjacentSnapshots(folder) {
+  await connectDb();
+  const filter = folder ? { folder_path: folder } : {};
+  // Get snapshots that have class_list populated, sorted by date
+  return Snapshot.find({ ...filter, 'class_list.0': { $exists: true } })
+    .sort({ commit_date: 1 })
+    .select('commit_hash commit_date class_list')
+    .lean();
+}
+
+module.exports = { connectDb, insertSnapshot, getSnapshots, getLatestSnapshot, hasCommit, getAdjacentSnapshots };

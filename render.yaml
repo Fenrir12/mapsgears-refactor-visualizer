@@ -17,3 +17,9 @@ services:
         sync: false
       - key: SYNC_INTERVAL_HOURS
         value: "6"
+      - key: DASHBOARD_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: NODE_ENV
+        value: "production"

@@ -63,6 +63,35 @@ export function useConfig() {
   return { data, loading };
 }
 
+export function useClassChanges() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchJson('/snapshots/class-changes')
+      .then(setData)
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return { data, loading };
+}
+
+export function useAuth() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then(res => res.ok ? res.json() : null)
+      .then(setUser)
+      .catch(() => setUser(null))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return { user, loading, isAuthenticated: !!user };
+}
+
 export async function triggerSync() {
   return fetchJson('/sync', { method: 'POST' });
 }

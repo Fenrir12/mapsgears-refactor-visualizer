@@ -3,6 +3,7 @@ import { useSnapshots, useLatestSnapshot, useConfig, triggerSync } from '../hook
 import SummaryCards from './SummaryCards';
 import BreakdownChart from './BreakdownChart';
 import Charts from './Charts';
+import ClassChanges from './ClassChanges';
 
 function StatusDot({ syncing }) {
   return (
@@ -71,7 +72,7 @@ export default function Dashboard() {
               )}
             </div>
 
-            {/* Sync controls */}
+            {/* Sync controls + user */}
             <div className="flex items-center gap-4">
               {latest?.synced_at && (
                 <div className="flex items-center gap-2">
@@ -98,6 +99,15 @@ export default function Dashboard() {
                     Syncing...
                   </span>
                 ) : 'Sync Now'}
+              </button>
+              <button
+                onClick={() => fetch('/auth/logout', { method: 'POST' }).then(() => window.location.reload())}
+                className="pl-2 border-l border-border font-mono text-[9px] text-text-muted hover:text-negative tracking-wider uppercase transition-colors cursor-pointer"
+                title="Logout"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
               </button>
             </div>
           </div>
@@ -176,6 +186,9 @@ export default function Dashboard() {
                 </div>
               </div>
             </div>
+
+            {/* Class changes summary */}
+            <ClassChanges />
 
             {/* Time series charts */}
             {snapshots.length > 1 ? (
