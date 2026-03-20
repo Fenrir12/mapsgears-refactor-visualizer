@@ -72,8 +72,14 @@ app.post('/api/sync', async (req, res) => {
 });
 
 // SPA fallback — serve index.html for non-API routes
+const fs = require('fs');
 app.get('/{*splat}', (req, res) => {
-  res.sendFile(path.join(clientDist, 'index.html'));
+  const indexPath = path.join(clientDist, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(503).send('Frontend not built yet. Run: cd client && npm run build');
+  }
 });
 
 // --- Start ---
