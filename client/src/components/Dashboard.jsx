@@ -4,6 +4,7 @@ import SummaryCards from './SummaryCards';
 import BreakdownChart from './BreakdownChart';
 import Charts from './Charts';
 import ClassChanges from './ClassChanges';
+import DuplicateClasses from './DuplicateClasses';
 
 function StatusDot({ syncing }) {
   return (
@@ -186,6 +187,9 @@ export default function Dashboard() {
                 </div>
               </div>
             </div>
+
+            {/* Duplicate implementations tracker */}
+            <DuplicateClasses />
 
             {/* Class changes summary */}
             <ClassChanges />

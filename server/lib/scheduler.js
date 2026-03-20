@@ -13,6 +13,10 @@ function startScheduler(config) {
     console.log('[scheduler] Triggered sync...');
     try {
       await runSync(config);
+      const additionalFolders = [config.compareFolder, ...(config.extraFolders || [])].filter(Boolean);
+      for (const folder of additionalFolders) {
+        await runSync({ ...config, targetFolder: folder });
+      }
     } catch (err) {
       console.error('[scheduler] Sync failed:', err.message);
     }

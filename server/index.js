@@ -39,6 +39,8 @@ const config = {
   apiToken: process.env.PHAB_API_TOKEN,
   callsign: process.env.REPO_CALLSIGN,
   targetFolder: process.env.TARGET_FOLDER,
+  compareFolder: process.env.COMPARE_FOLDER,
+  extraFolders: process.env.EXTRA_FOLDERS ? process.env.EXTRA_FOLDERS.split(',').map(f => f.trim()).filter(Boolean) : [],
   syncIntervalHours: process.env.SYNC_INTERVAL_HOURS || '6',
 };
 
@@ -118,6 +120,81 @@ app.get('/api/snapshots/class-changes', async (req, res) => {
   }
 });
 
+app.get('/api/snapshots/duplicates', async (req, res) => {
+  const compareFolder = config.compareFolder;
+
+  if (!compareFolder) {
+    return res.json({ pairs: [], error: 'COMPARE_FOLDER not configured' });
+  }
+
+  // All folders to compare against the compare folder
+  const targetFolders = [config.targetFolder, ...config.extraFolders].filter(Boolean);
+
+  try {
+    const compareSnaps = await getAdjacentSnapshots(compareFolder);
+    if (compareSnaps.length === 0) {
+      return res.json({ pairs: [], needsSync: true });
+    }
+
+    const latestCompare = compareSnaps[compareSnaps.length - 1];
+    const compareNames = new Set(latestCompare.class_list.map(c => c.name));
+
+    const pairs = [];
+
+    for (const targetFolder of targetFolders) {
+      const targetSnaps = await getAdjacentSnapshots(targetFolder);
+      if (targetSnaps.length === 0) continue;
+
+      const latestTarget = targetSnaps[targetSnaps.length - 1];
+      const targetNames = new Set(latestTarget.class_list.map(c => c.name));
+
+      // Duplicates = class names that exist in BOTH folders
+      const duplicateNames = [...targetNames].filter(n => compareNames.has(n));
+
+      const duplicates = duplicateNames.map(name => {
+        const tFiles = latestTarget.class_list.filter(c => c.name === name);
+        const cFiles = latestCompare.class_list.filter(c => c.name === name);
+        return {
+          name,
+          targetFiles: tFiles.map(c => ({ file: c.file, language: c.language })),
+          compareFiles: cFiles.map(c => ({ file: c.file, language: c.language })),
+        };
+      });
+
+      // Compute trend for this pair
+      const trend = [];
+      for (const tSnap of targetSnaps) {
+        const tDate = new Date(tSnap.commit_date).getTime();
+        let closest = compareSnaps[0];
+        let minDiff = Math.abs(new Date(closest.commit_date).getTime() - tDate);
+        for (const cSnap of compareSnaps) {
+          const diff = Math.abs(new Date(cSnap.commit_date).getTime() - tDate);
+          if (diff < minDiff) { closest = cSnap; minDiff = diff; }
+        }
+        const cNames = new Set(closest.class_list.map(c => c.name));
+        const tNames = new Set(tSnap.class_list.map(c => c.name));
+        const count = [...tNames].filter(n => cNames.has(n)).length;
+        trend.push({ commit: tSnap.commit_hash.substring(0, 8), date: tSnap.commit_date, count });
+      }
+
+      pairs.push({
+        targetFolder,
+        compareFolder,
+        count: duplicates.length,
+        duplicates,
+        targetClasses: latestTarget.class_list.length,
+        compareClasses: latestCompare.class_list.length,
+        trend,
+      });
+    }
+
+    res.json({ pairs });
+  } catch (err) {
+    console.error('[api] Duplicates error:', err.message);
+    res.status(500).json({ error: 'Failed to compute duplicates' });
+  }
+});
+
 app.post('/api/sync', async (req, res) => {
   if (isSyncing()) {
     return res.status(409).json({ error: 'Sync already in progress' });
@@ -130,6 +207,11 @@ app.post('/api/sync', async (req, res) => {
   res.json({ message: 'Sync started' });
   try {
     await runSync(config);
+    // Sync compare folder and extra folders
+    const additionalFolders = [config.compareFolder, ...config.extraFolders].filter(Boolean);
+    for (const folder of additionalFolders) {
+      await runSync({ ...config, targetFolder: folder });
+    }
   } catch (err) {
     console.error('[api] Sync error:', err.message);
   }

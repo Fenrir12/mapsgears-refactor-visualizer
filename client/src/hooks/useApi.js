@@ -77,6 +77,20 @@ export function useClassChanges() {
   return { data, loading };
 }
 
+export function useDuplicates() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchJson('/snapshots/duplicates')
+      .then(setData)
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return { data, loading };
+}
+
 export function useAuth() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
