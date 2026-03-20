@@ -26,12 +26,12 @@ app.get('/api/auth/me', meHandler);
 app.post('/api/auth/login', loginHandler);
 app.post('/auth/logout', logoutHandler);
 
-// --- Auth guard ---
-app.use(requireAuth);
-
-// Serve static frontend
+// Serve static frontend (before auth guard so the login page loads)
 const clientDist = path.join(__dirname, '..', 'client', 'dist');
 app.use(express.static(clientDist));
+
+// --- Auth guard (protects API routes below) ---
+app.use(requireAuth);
 
 // Config from environment
 const config = {

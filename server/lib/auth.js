@@ -30,14 +30,14 @@ const PUBLIC_PATHS = ['/api/auth/me', '/api/auth/login'];
 function requireAuth(req, res, next) {
   if (PUBLIC_PATHS.some(p => req.path === p)) return next();
 
+  // Only guard API routes — static files and SPA fallback are public
+  if (!req.path.startsWith('/api/')) return next();
+
   // If no password configured, skip auth entirely
   if (!process.env.DASHBOARD_PASSWORD) return next();
 
   if (req.session && req.session.authenticated) return next();
 
-  if (req.path.startsWith('/api/')) {
-    return res.status(401).json({ error: 'Not authenticated' });
-  }
   return res.status(401).json({ error: 'Not authenticated' });
 }
 
