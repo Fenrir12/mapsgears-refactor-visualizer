@@ -13,9 +13,7 @@ services:
         sync: false
       - key: TARGET_FOLDER
         sync: false
+      - key: MONGODB_URI
+        sync: false
       - key: SYNC_INTERVAL_HOURS
         value: "6"
-    disk:
-      name: data
-      mountPath: /opt/render/project/src/data
-      sizeGB: 1

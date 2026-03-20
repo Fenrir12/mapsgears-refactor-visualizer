@@ -1,94 +1,70 @@
-const Database = require('better-sqlite3');
-const path = require('path');
+const mongoose = require('mongoose');
 
-const DB_PATH = path.join(__dirname, '..', '..', 'data.db');
+const snapshotSchema = new mongoose.Schema({
+  commit_hash: { type: String, required: true },
+  commit_date: { type: String, required: true },
+  synced_at: { type: Date, default: Date.now },
+  folder_path: { type: String, required: true },
+  total_lines: { type: Number, default: 0 },
+  java_lines: { type: Number, default: 0 },
+  kotlin_lines: { type: Number, default: 0 },
+  total_classes: { type: Number, default: 0 },
+  java_classes: { type: Number, default: 0 },
+  kotlin_classes: { type: Number, default: 0 },
+  total_files: { type: Number, default: 0 },
+  java_files: { type: Number, default: 0 },
+  kotlin_files: { type: Number, default: 0 },
+});
 
-let db;
+snapshotSchema.index({ commit_hash: 1, folder_path: 1 }, { unique: true });
+snapshotSchema.index({ commit_date: 1 });
+snapshotSchema.index({ folder_path: 1 });
 
-function getDb() {
-  if (!db) {
-    db = new Database(DB_PATH);
-    db.pragma('journal_mode = WAL');
-    initialize();
+const Snapshot = mongoose.model('Snapshot', snapshotSchema);
+
+let connected = false;
+
+async function connectDb() {
+  if (connected) return;
+  const uri = process.env.MONGODB_URI;
+  if (!uri) throw new Error('MONGODB_URI not set');
+  await mongoose.connect(uri);
+  connected = true;
+}
+
+
+async function insertSnapshot(data) {
+  await connectDb();
+  try {
+    await Snapshot.create(data);
+  } catch (err) {
+    // Ignore duplicate key (already have this commit)
+    if (err.code !== 11000) throw err;
   }
-  return db;
 }
 
-function initialize() {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS snapshots (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      commit_hash TEXT NOT NULL,
-      commit_date TEXT NOT NULL,
-      synced_at TEXT NOT NULL DEFAULT (datetime('now')),
-      folder_path TEXT NOT NULL,
-      total_lines INTEGER NOT NULL DEFAULT 0,
-      java_lines INTEGER NOT NULL DEFAULT 0,
-      kotlin_lines INTEGER NOT NULL DEFAULT 0,
-      total_classes INTEGER NOT NULL DEFAULT 0,
-      java_classes INTEGER NOT NULL DEFAULT 0,
-      kotlin_classes INTEGER NOT NULL DEFAULT 0,
-      total_files INTEGER NOT NULL DEFAULT 0,
-      java_files INTEGER NOT NULL DEFAULT 0,
-      kotlin_files INTEGER NOT NULL DEFAULT 0,
-      UNIQUE(commit_hash, folder_path)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_snapshots_date ON snapshots(commit_date);
-    CREATE INDEX IF NOT EXISTS idx_snapshots_folder ON snapshots(folder_path);
-  `);
-}
-
-function insertSnapshot(snapshot) {
-  const stmt = getDb().prepare(`
-    INSERT OR IGNORE INTO snapshots (
-      commit_hash, commit_date, folder_path,
-      total_lines, java_lines, kotlin_lines,
-      total_classes, java_classes, kotlin_classes,
-      total_files, java_files, kotlin_files
-    ) VALUES (
-      @commit_hash, @commit_date, @folder_path,
-      @total_lines, @java_lines, @kotlin_lines,
-      @total_classes, @java_classes, @kotlin_classes,
-      @total_files, @java_files, @kotlin_files
-    )
-  `);
-  return stmt.run(snapshot);
-}
-
-function getSnapshots({ folder, startDate, endDate } = {}) {
-  let query = 'SELECT * FROM snapshots WHERE 1=1';
-  const params = {};
-
-  if (folder) {
-    query += ' AND folder_path = @folder';
-    params.folder = folder;
+async function getSnapshots({ folder, startDate, endDate } = {}) {
+  await connectDb();
+  const filter = {};
+  if (folder) filter.folder_path = folder;
+  if (startDate || endDate) {
+    filter.commit_date = {};
+    if (startDate) filter.commit_date.$gte = startDate;
+    if (endDate) filter.commit_date.$lte = endDate;
   }
-  if (startDate) {
-    query += ' AND commit_date >= @startDate';
-    params.startDate = startDate;
-  }
-  if (endDate) {
-    query += ' AND commit_date <= @endDate';
-    params.endDate = endDate;
-  }
-
-  query += ' ORDER BY commit_date ASC';
-  return getDb().prepare(query).all(params);
+  return Snapshot.find(filter).sort({ commit_date: 1 }).lean();
 }
 
-function getLatestSnapshot(folder) {
-  const query = folder
-    ? 'SELECT * FROM snapshots WHERE folder_path = ? ORDER BY commit_date DESC LIMIT 1'
-    : 'SELECT * FROM snapshots ORDER BY commit_date DESC LIMIT 1';
-  return folder ? getDb().prepare(query).get(folder) : getDb().prepare(query).get();
+async function getLatestSnapshot(folder) {
+  await connectDb();
+  const filter = folder ? { folder_path: folder } : {};
+  return Snapshot.findOne(filter).sort({ commit_date: -1 }).lean();
 }
 
-function hasCommit(commitHash, folder) {
-  const row = getDb().prepare(
-    'SELECT 1 FROM snapshots WHERE commit_hash = ? AND folder_path = ?'
-  ).get(commitHash, folder);
-  return !!row;
+async function hasCommit(commitHash, folder) {
+  await connectDb();
+  const doc = await Snapshot.exists({ commit_hash: commitHash, folder_path: folder });
+  return !!doc;
 }
 
-module.exports = { getDb, insertSnapshot, getSnapshots, getLatestSnapshot, hasCommit };
+module.exports = { connectDb, insertSnapshot, getSnapshots, getLatestSnapshot, hasCommit };

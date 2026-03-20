@@ -60,7 +60,8 @@ async function runSync({ phabUrl, apiToken, callsign, targetFolder }) {
     console.log(`[sync] Found ${history.length} commits in history`);
 
     // Filter out commits we already have
-    const newCommits = history.filter((c) => !hasCommit(c.commitHash, targetFolder));
+    const checks = await Promise.all(history.map(async (c) => !(await hasCommit(c.commitHash, targetFolder))));
+    const newCommits = history.filter((_, i) => checks[i]);
     console.log(`[sync] ${newCommits.length} new commits to analyze`);
 
     if (newCommits.length === 0) {
@@ -78,7 +79,7 @@ async function runSync({ phabUrl, apiToken, callsign, targetFolder }) {
     let newSnapshots = 0;
 
     for (const commit of sampled) {
-      if (hasCommit(commit.commitHash, targetFolder)) continue;
+      if (await hasCommit(commit.commitHash, targetFolder)) continue;
 
       console.log(`[sync] Analyzing commit ${commit.commitHash.substring(0, 8)} (${commit.commitDate})`);
 
@@ -112,7 +113,7 @@ async function runSync({ phabUrl, apiToken, callsign, targetFolder }) {
 
         // Aggregate and store
         const metrics = aggregateMetrics(fileResults);
-        insertSnapshot({
+        await insertSnapshot({
           commit_hash: commit.commitHash,
           commit_date: commit.commitDate,
           folder_path: targetFolder,

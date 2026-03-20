@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const { getSnapshots, getLatestSnapshot } = require('./lib/db');
+const { connectDb, getSnapshots, getLatestSnapshot } = require('./lib/db');
 const { runSync, isSyncing } = require('./lib/sync');
 const { startScheduler } = require('./lib/scheduler');
 
@@ -37,9 +37,9 @@ app.get('/api/config', (req, res) => {
   });
 });
 
-app.get('/api/snapshots', (req, res) => {
+app.get('/api/snapshots', async (req, res) => {
   const { folder, startDate, endDate } = req.query;
-  const snapshots = getSnapshots({
+  const snapshots = await getSnapshots({
     folder: folder || config.targetFolder,
     startDate,
     endDate,
@@ -47,9 +47,9 @@ app.get('/api/snapshots', (req, res) => {
   res.json(snapshots);
 });
 
-app.get('/api/snapshots/latest', (req, res) => {
+app.get('/api/snapshots/latest', async (req, res) => {
   const folder = req.query.folder || config.targetFolder;
-  const snapshot = getLatestSnapshot(folder);
+  const snapshot = await getLatestSnapshot(folder);
   res.json(snapshot || null);
 });
 
@@ -79,14 +79,24 @@ app.get('/{*splat}', (req, res) => {
 // --- Start ---
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`[server] Listening on port ${PORT}`);
 
-  // Start scheduled sync if Phabricator is configured
-  if (config.phabUrl && config.apiToken) {
-    startScheduler(config);
-    console.log('[server] Scheduler started');
-  } else {
-    console.log('[server] Phabricator not configured — scheduler disabled');
-  }
+async function start() {
+  await connectDb();
+
+  app.listen(PORT, () => {
+    console.log(`[server] Listening on port ${PORT}`);
+
+    // Start scheduled sync if Phabricator is configured
+    if (config.phabUrl && config.apiToken) {
+      startScheduler(config);
+      console.log('[server] Scheduler started');
+    } else {
+      console.log('[server] Phabricator not configured — scheduler disabled');
+    }
+  });
+}
+
+start().catch((err) => {
+  console.error('[server] Failed to start:', err.message);
+  process.exit(1);
 });
