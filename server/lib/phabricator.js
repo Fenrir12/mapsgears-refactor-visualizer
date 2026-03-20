@@ -9,7 +9,9 @@ class PhabricatorClient {
   }
 
   async callConduit(method, params = {}) {
-    const url = `${this.baseUrl}/api/${method}`;
+    // baseUrl may already end with /api/ or not
+    const base = this.baseUrl.replace(/\/api\/?$/, '');
+    const url = `${base}/api/${method}`;
     const body = new URLSearchParams({
       'api.token': this.apiToken,
       ...this._flattenParams(params),
@@ -66,11 +68,15 @@ class PhabricatorClient {
     return result;
   }
 
+  // Phabricator fileType constants
+  static FILE_TYPE_FILE = 7;
+  static FILE_TYPE_DIR = 4;
+
   /**
    * Browse a directory in the repository at a given commit.
    * Returns list of file paths.
    */
-  async browseDirectory(callsign, path, commit) {
+  async browseDirectory(callsign, path, commit = 'master') {
     const result = await this.callConduit('diffusion.browsequery', {
       callsign,
       path,
@@ -78,21 +84,28 @@ class PhabricatorClient {
     });
     if (!result || !result.paths) return [];
     return result.paths
-      .filter((p) => p.fileType === 'file')
+      .filter((p) => Number(p.fileType) === PhabricatorClient.FILE_TYPE_FILE)
       .map((p) => p.fullPath);
   }
 
   /**
    * Get file content at a given commit.
+   * Phabricator returns a filePHID which must be downloaded separately.
    */
-  async getFileContent(callsign, path, commit) {
+  async getFileContent(callsign, path, commit = 'master') {
     const result = await this.callConduit('diffusion.filecontentquery', {
       callsign,
       path,
       commit,
     });
-    if (!result || !result.blob) return '';
-    return Buffer.from(result.blob, 'base64').toString('utf-8');
+    if (!result || !result.filePHID) return '';
+
+    // Download actual content via file.download
+    const fileData = await this.callConduit('file.download', {
+      phid: result.filePHID,
+    });
+    if (!fileData) return '';
+    return Buffer.from(fileData, 'base64').toString('utf-8');
   }
 
   /**
@@ -103,20 +116,21 @@ class PhabricatorClient {
     const result = await this.callConduit('diffusion.historyquery', {
       callsign,
       path,
+      commit: 'master',
       limit,
     });
     if (!result || !result.pathChanges) return [];
     return result.pathChanges.map((change) => ({
       commitHash: change.commitIdentifier,
-      commitDate: new Date(change.epoch * 1000).toISOString(),
-      summary: change.summary || '',
+      commitDate: new Date(Number(change.commit.epoch) * 1000).toISOString(),
+      summary: change.commit.summary || '',
     }));
   }
 
   /**
    * Recursively list all files under a directory at a commit.
    */
-  async listFilesRecursive(callsign, basePath, commit) {
+  async listFilesRecursive(callsign, basePath, commit = 'master') {
     const allFiles = [];
 
     const browse = async (dirPath) => {
@@ -128,9 +142,10 @@ class PhabricatorClient {
       if (!result || !result.paths) return;
 
       for (const entry of result.paths) {
-        if (entry.fileType === 'file') {
+        const ft = Number(entry.fileType);
+        if (ft === PhabricatorClient.FILE_TYPE_FILE) {
           allFiles.push(entry.fullPath);
-        } else if (entry.fileType === 'dir') {
+        } else if (ft === PhabricatorClient.FILE_TYPE_DIR) {
           await browse(entry.fullPath);
         }
       }
