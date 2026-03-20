@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: refactor-visualizer
+    runtime: node
+    buildCommand: npm install && cd client && npm install && npm run build
+    startCommand: node server/index.js
+    envVars:
+      - key: PHAB_URL
+        sync: false
+      - key: PHAB_API_TOKEN
+        sync: false
+      - key: REPO_CALLSIGN
+        sync: false
+      - key: TARGET_FOLDER
+        sync: false
+      - key: SYNC_INTERVAL_HOURS
+        value: "6"
+    disk:
+      name: data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1

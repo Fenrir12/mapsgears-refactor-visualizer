@@ -1,0 +1,21 @@
+{
+  "name": "refactor-visualizer",
+  "version": "1.0.0",
+  "description": "Visualize Java/Kotlin refactor progress from Phabricator VCS",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js",
+    "build": "cd client && npm run build"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.8.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "node-cron": "^4.2.1"
+  }
+}
