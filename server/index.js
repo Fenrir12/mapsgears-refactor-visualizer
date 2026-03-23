@@ -1,4 +1,18 @@
-require('dotenv').config();
+const path_env = require('path');
+require('dotenv').config({ path: path_env.join(__dirname, '..', '.env'), override: true });
+
+// Log ALL outgoing HTTP/HTTPS requests to verify no Phabricator API calls are leaking
+const http = require('http');
+const https = require('https');
+for (const mod of [http, https]) {
+  const origRequest = mod.request;
+  mod.request = function patchedRequest(...args) {
+    const url = typeof args[0] === 'string' ? args[0] : (args[0] instanceof URL ? args[0].href : `${args[0].hostname || args[0].host}${args[0].path || ''}`);
+    console.log(`[http-out] ${(args[0]?.method || args[1]?.method || 'GET').toUpperCase()} ${url}`);
+    return origRequest.apply(this, args);
+  };
+}
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -45,6 +59,8 @@ const config = {
   syncIntervalHours: process.env.SYNC_INTERVAL_HOURS || '6',
   repoDir: process.env.REPO_DIR || path.join('/tmp', 'repo-cache', process.env.REPO_CALLSIGN || 'default'),
   gitCloneUrl: process.env.GIT_CLONE_URL || '',
+  gitCloneUser: process.env.GIT_CLONE_USER || '',
+  gitClonePassword: process.env.GIT_CLONE_PASSWORD || '',
 };
 
 // --- API Routes ---
@@ -235,10 +251,21 @@ app.get('/{*splat}', (req, res) => {
 
 // --- Start ---
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 
 async function start() {
   await connectDb();
+
+  if (config.phabUrl && config.apiToken) {
+    // Pre-clone repo on startup so first sync is fast
+    try {
+      const gitClient = new GitClient(config);
+      await gitClient.ensureRepo();
+      console.log('[server] Repository ready');
+    } catch (err) {
+      console.warn(`[server] Failed to pre-clone repo: ${err.message}. Sync will retry on first run.`);
+    }
+  }
 
   app.listen(PORT, () => {
     console.log(`[server] Listening on port ${PORT}`);
@@ -250,15 +277,6 @@ async function start() {
     }
 
     if (config.phabUrl && config.apiToken) {
-      // Pre-clone repo on startup so first sync is fast
-      try {
-        const gitClient = new GitClient(config);
-        await gitClient.ensureRepo();
-        console.log('[server] Repository ready');
-      } catch (err) {
-        console.warn(`[server] Failed to pre-clone repo: ${err.message}. Sync will retry on first run.`);
-      }
-
       startScheduler(config);
       console.log('[server] Scheduler started');
     } else {
