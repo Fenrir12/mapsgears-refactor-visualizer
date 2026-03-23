@@ -57,7 +57,7 @@ async function getSnapshots({ folder, startDate, endDate } = {}) {
     if (startDate) filter.commit_date.$gte = startDate;
     if (endDate) filter.commit_date.$lte = endDate;
   }
-  return Snapshot.find(filter).sort({ commit_date: 1 }).lean();
+  return Snapshot.find(filter).sort({ commit_date: 1 }).select('-class_list').lean();
 }
 
 async function getLatestSnapshot(folder) {
@@ -82,4 +82,45 @@ async function getAdjacentSnapshots(folder) {
     .lean();
 }
 
-module.exports = { connectDb, insertSnapshot, getSnapshots, getLatestSnapshot, hasCommit, getAdjacentSnapshots };
+/**
+ * Get snapshots with only class names (not full class_list objects) for trend calculations.
+ * Much lighter than getAdjacentSnapshots.
+ */
+async function getSnapshotClassNames(folder) {
+  await connectDb();
+  const filter = folder ? { folder_path: folder } : {};
+  const snapshots = await Snapshot.find({ ...filter, 'class_list.0': { $exists: true } })
+    .sort({ commit_date: 1 })
+    .select('commit_hash commit_date class_list.name')
+    .lean();
+  // Extract just the name strings to minimize memory
+  return snapshots.map(s => ({
+    commit_hash: s.commit_hash,
+    commit_date: s.commit_date,
+    classNames: new Set(s.class_list.map(c => c.name)),
+  }));
+}
+
+/**
+ * Get count of snapshots with class_list for a folder.
+ */
+async function countAdjacentSnapshots(folder) {
+  await connectDb();
+  const filter = folder ? { folder_path: folder } : {};
+  return Snapshot.countDocuments({ ...filter, 'class_list.0': { $exists: true } });
+}
+
+/**
+ * Get a cursor over snapshots with class_list, sorted by date.
+ * Allows processing one at a time to avoid loading all into memory.
+ */
+function getAdjacentSnapshotsCursor(folder) {
+  const filter = folder ? { folder_path: folder } : {};
+  return Snapshot.find({ ...filter, 'class_list.0': { $exists: true } })
+    .sort({ commit_date: 1 })
+    .select('commit_hash commit_date class_list')
+    .lean()
+    .cursor();
+}
+
+module.exports = { connectDb, insertSnapshot, getSnapshots, getLatestSnapshot, hasCommit, getAdjacentSnapshots, getSnapshotClassNames, countAdjacentSnapshots, getAdjacentSnapshotsCursor };

@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
-const { connectDb, getSnapshots, getLatestSnapshot, getAdjacentSnapshots } = require('./lib/db');
+const { connectDb, getSnapshots, getLatestSnapshot, getAdjacentSnapshots, getSnapshotClassNames, countAdjacentSnapshots, getAdjacentSnapshotsCursor } = require('./lib/db');
 const { runSync, isSyncing } = require('./lib/sync');
 const { startScheduler } = require('./lib/scheduler');
 const {
@@ -77,16 +77,17 @@ app.get('/api/snapshots/latest', async (req, res) => {
 app.get('/api/snapshots/class-changes', async (req, res) => {
   const folder = req.query.folder || config.targetFolder;
   try {
-    const snapshots = await getAdjacentSnapshots(folder);
-    if (snapshots.length < 2) {
-      return res.json({ changes: [], snapshots: snapshots.length });
+    const totalSnapshots = await countAdjacentSnapshots(folder);
+    if (totalSnapshots < 2) {
+      return res.json({ changes: [], snapshots: totalSnapshots });
     }
 
     const changes = [];
-    for (let i = 1; i < snapshots.length; i++) {
-      const prev = snapshots[i - 1];
-      const curr = snapshots[i];
+    // Stream snapshots one at a time, only holding 2 in memory
+    const cursor = getAdjacentSnapshotsCursor(folder);
+    let prev = await cursor.next();
 
+    for await (const curr of cursor) {
       const prevSet = new Map(prev.class_list.map(c => [`${c.name}:::${c.file}`, c]));
       const currSet = new Map(curr.class_list.map(c => [`${c.name}:::${c.file}`, c]));
 
@@ -111,9 +112,11 @@ app.get('/api/snapshots/class-changes', async (req, res) => {
           net: added.length - removed.length,
         });
       }
+
+      prev = curr;
     }
 
-    res.json({ changes, totalSnapshots: snapshots.length });
+    res.json({ changes, totalSnapshots });
   } catch (err) {
     console.error('[api] Class changes error:', err.message);
     res.status(500).json({ error: 'Failed to compute class changes' });
@@ -131,21 +134,22 @@ app.get('/api/snapshots/duplicates', async (req, res) => {
   const targetFolders = [config.targetFolder, ...config.extraFolders].filter(Boolean);
 
   try {
-    const compareSnaps = await getAdjacentSnapshots(compareFolder);
-    if (compareSnaps.length === 0) {
+    // Only load the latest snapshot (with full class_list) for the comparison
+    const latestCompare = await getLatestSnapshot(compareFolder);
+    if (!latestCompare || !latestCompare.class_list || latestCompare.class_list.length === 0) {
       return res.json({ pairs: [], needsSync: true });
     }
 
-    const latestCompare = compareSnaps[compareSnaps.length - 1];
     const compareNames = new Set(latestCompare.class_list.map(c => c.name));
+    // Lightweight trend data: only class names, no file paths
+    const compareTrendSnaps = await getSnapshotClassNames(compareFolder);
 
     const pairs = [];
 
     for (const targetFolder of targetFolders) {
-      const targetSnaps = await getAdjacentSnapshots(targetFolder);
-      if (targetSnaps.length === 0) continue;
+      const latestTarget = await getLatestSnapshot(targetFolder);
+      if (!latestTarget || !latestTarget.class_list || latestTarget.class_list.length === 0) continue;
 
-      const latestTarget = targetSnaps[targetSnaps.length - 1];
       const targetNames = new Set(latestTarget.class_list.map(c => c.name));
 
       // Duplicates = class names that exist in BOTH folders
@@ -161,19 +165,18 @@ app.get('/api/snapshots/duplicates', async (req, res) => {
         };
       });
 
-      // Compute trend for this pair
+      // Compute trend using lightweight class-name-only snapshots
+      const targetTrendSnaps = await getSnapshotClassNames(targetFolder);
       const trend = [];
-      for (const tSnap of targetSnaps) {
+      for (const tSnap of targetTrendSnaps) {
         const tDate = new Date(tSnap.commit_date).getTime();
-        let closest = compareSnaps[0];
+        let closest = compareTrendSnaps[0];
         let minDiff = Math.abs(new Date(closest.commit_date).getTime() - tDate);
-        for (const cSnap of compareSnaps) {
+        for (const cSnap of compareTrendSnaps) {
           const diff = Math.abs(new Date(cSnap.commit_date).getTime() - tDate);
           if (diff < minDiff) { closest = cSnap; minDiff = diff; }
         }
-        const cNames = new Set(closest.class_list.map(c => c.name));
-        const tNames = new Set(tSnap.class_list.map(c => c.name));
-        const count = [...tNames].filter(n => cNames.has(n)).length;
+        const count = [...tSnap.classNames].filter(n => closest.classNames.has(n)).length;
         trend.push({ commit: tSnap.commit_hash.substring(0, 8), date: tSnap.commit_date, count });
       }
 
