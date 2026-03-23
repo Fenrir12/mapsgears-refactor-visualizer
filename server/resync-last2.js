@@ -7,7 +7,8 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
 const { connectDb } = require('./lib/db');
-const PhabricatorClient = require('./lib/phabricator');
+const GitClient = require('./lib/git-client');
+const path = require('path');
 const { analyzeFileContent, aggregateMetrics } = require('./lib/analyzer');
 
 const CONCURRENCY = 10;
@@ -54,16 +55,19 @@ async function main() {
   console.log(`\nDeleted ${deleteResult.deletedCount} snapshots.`);
 
   // Re-analyze those commits
-  const client = new PhabricatorClient(process.env.PHAB_URL, process.env.PHAB_API_TOKEN);
+  const client = new GitClient({
+    phabUrl: process.env.PHAB_URL,
+    apiToken: process.env.PHAB_API_TOKEN,
+    callsign,
+    repoDir: process.env.REPO_DIR || path.join('/tmp', 'repo-cache', callsign),
+    gitCloneUrl: process.env.GIT_CLONE_URL || '',
+  });
+  await client.ensureRepo();
 
   for (const snap of last2) {
     console.log(`\nRe-analyzing commit ${snap.commit_hash.substring(0, 8)} (${snap.commit_date})...`);
 
-    const allPaths = await client.callConduit('diffusion.querypaths', {
-      callsign,
-      path: targetFolder,
-      commit: snap.commit_hash,
-    });
+    const allPaths = await client.listFiles(targetFolder, snap.commit_hash);
 
     const javaKotlinFiles = (allPaths || []).filter(
       f => f.endsWith('.java') || f.endsWith('.kt')
@@ -72,7 +76,7 @@ async function main() {
 
     const fileResults = await pooled(javaKotlinFiles, CONCURRENCY, async (filePath) => {
       try {
-        const content = await client.getFileContent(callsign, filePath, snap.commit_hash);
+        const content = await client.getFileContent(filePath, snap.commit_hash);
         return analyzeFileContent(content, filePath);
       } catch (err) {
         console.warn(`  Warning: could not read ${filePath}: ${err.message}`);

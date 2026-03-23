@@ -13,6 +13,7 @@ const {
   loginHandler,
   logoutHandler,
 } = require('./lib/auth');
+const GitClient = require('./lib/git-client');
 
 const app = express();
 
@@ -42,6 +43,8 @@ const config = {
   compareFolder: process.env.COMPARE_FOLDER,
   extraFolders: process.env.EXTRA_FOLDERS ? process.env.EXTRA_FOLDERS.split(',').map(f => f.trim()).filter(Boolean) : [],
   syncIntervalHours: process.env.SYNC_INTERVAL_HOURS || '6',
+  repoDir: process.env.REPO_DIR || path.join('/tmp', 'repo-cache', process.env.REPO_CALLSIGN || 'default'),
+  gitCloneUrl: process.env.GIT_CLONE_URL || '',
 };
 
 // --- API Routes ---
@@ -204,7 +207,7 @@ app.post('/api/sync', async (req, res) => {
   }
 
   if (!config.phabUrl || !config.apiToken) {
-    return res.status(500).json({ error: 'Phabricator not configured. Set PHAB_URL and PHAB_API_TOKEN.' });
+    return res.status(500).json({ error: 'Not configured. Set PHAB_URL and PHAB_API_TOKEN.' });
   }
 
   res.json({ message: 'Sync started' });
@@ -247,6 +250,15 @@ async function start() {
     }
 
     if (config.phabUrl && config.apiToken) {
+      // Pre-clone repo on startup so first sync is fast
+      try {
+        const gitClient = new GitClient(config);
+        await gitClient.ensureRepo();
+        console.log('[server] Repository ready');
+      } catch (err) {
+        console.warn(`[server] Failed to pre-clone repo: ${err.message}. Sync will retry on first run.`);
+      }
+
       startScheduler(config);
       console.log('[server] Scheduler started');
     } else {

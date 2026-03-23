@@ -1,4 +1,4 @@
-const PhabricatorClient = require('./phabricator');
+const GitClient = require('./git-client');
 const { analyzeFileContent, aggregateMetrics } = require('./analyzer');
 const { insertSnapshot, hasCommit } = require('./db');
 
@@ -43,7 +43,7 @@ function sampleEvenly(arr, n) {
   return result;
 }
 
-async function runSync({ phabUrl, apiToken, callsign, targetFolder }) {
+async function runSync({ phabUrl, apiToken, callsign, targetFolder, repoDir, gitCloneUrl }) {
   if (syncing) {
     console.log('[sync] Already running, skipping.');
     return { skipped: true };
@@ -53,10 +53,11 @@ async function runSync({ phabUrl, apiToken, callsign, targetFolder }) {
   console.log(`[sync] Starting sync for ${callsign}:${targetFolder}`);
 
   try {
-    const client = new PhabricatorClient(phabUrl, apiToken);
+    const client = new GitClient({ phabUrl, apiToken, callsign, repoDir, gitCloneUrl });
+    await client.ensureRepo();
 
     // Get commit history for the target folder
-    const history = await client.getHistory(callsign, targetFolder, 500);
+    const history = await client.getHistory(targetFolder, 500);
     console.log(`[sync] Found ${history.length} commits in history`);
 
     // Filter out commits we already have
@@ -84,12 +85,8 @@ async function runSync({ phabUrl, apiToken, callsign, targetFolder }) {
       console.log(`[sync] Analyzing commit ${commit.commitHash.substring(0, 8)} (${commit.commitDate})`);
 
       try {
-        // Use querypaths for fast recursive file listing
-        const allPaths = await client.callConduit('diffusion.querypaths', {
-          callsign,
-          path: targetFolder,
-          commit: commit.commitHash,
-        });
+        // List files in folder at this commit
+        const allPaths = await client.listFiles(targetFolder, commit.commitHash);
 
         const javaKotlinFiles = (allPaths || []).filter(
           (f) => f.endsWith('.java') || f.endsWith('.kt')
@@ -103,7 +100,7 @@ async function runSync({ phabUrl, apiToken, callsign, targetFolder }) {
         // Download and analyze files with concurrency limit
         const fileResults = await pooled(javaKotlinFiles, CONCURRENCY, async (filePath) => {
           try {
-            const content = await client.getFileContent(callsign, filePath, commit.commitHash);
+            const content = await client.getFileContent(filePath, commit.commitHash);
             return analyzeFileContent(content, filePath);
           } catch (err) {
             console.warn(`[sync]   Warning: could not read ${filePath}: ${err.message}`);
