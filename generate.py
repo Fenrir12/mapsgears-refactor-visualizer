@@ -10,6 +10,7 @@ Usage:
 import sys
 import os
 import subprocess
+import webbrowser
 import concurrent.futures
 
 from lib.git_reader import get_commits, list_files, get_file_content
@@ -256,6 +257,7 @@ def main():
         f.write(html_content)
 
     print(f'Report written to: {output_path}')
+    webbrowser.open(f'file://{output_path}')
 
 
 if __name__ == '__main__':
